@@ -91,8 +91,9 @@ common:setup:
     - ["common:setup"]
   before_script:
     - source bin/env.sh
+    - export PATH="${CI_PROJECT_DIR}/bin:${PATH}"
     - ls -lrtha
-    - ln -s "${LOCAL_DATA_PATH}/sim_output" sim_output
+    - bin/mkdir_local_data_link sim_output
     - mkdir -p "$SNAKEMAKE_OUTPUT_CACHE"
     - ls -lrtha
   retry:
