@@ -1,0 +1,39 @@
+# Beam setups of the afterburner benchmark: one row per (energy, beam regime) that both
+# Pythia8 + eicBeamShape and abconv define.
+#
+#   steering  eicSimuBeamEffects Pythia8 steering file. Its beam energies are overridden by the
+#             setup's (EBEAM x PBEAM), so a file of another energy can stand in where
+#             eicBeamShape itself copies the parameters (marked "copy").
+#   config    eicBeamShape configuration flag: 1 high divergence, 2 high acceptance, 3 eA
+#   preset    abconv preset (-p)
+#   ci        part of the default (CI) selection
+#
+# Names: <EBEAM>x<PBEAM>_<regime>, lepton energy first, per-nucleon hadron energy for eA.
+
+# --- e+p, CDR energies, high divergence (CDR table 3.3)
+18x275_hidiv: {steering: dis_eicBeam_hiDiv_18x275_10to100, config: 1, preset: ip6_hidiv_275x18, ci: true}
+10x275_hidiv: {steering: dis_eicBeam_hiDiv_10x275_10to100, config: 1, preset: ip6_hidiv_275x10}
+10x100_hidiv: {steering: dis_eicBeam_hiDiv_10x100_10to100, config: 1, preset: ip6_hidiv_100x10, ci: true}
+5x100_hidiv:  {steering: dis_eicBeam_hiDiv_5x100_10to100,  config: 1, preset: ip6_hidiv_100x5}
+5x41_hidiv:   {steering: dis_eicBeam_hiDiv_5x41_10to100,   config: 1, preset: ip6_hidiv_41x5, ci: true}
+
+# --- e+p, CDR energies, high acceptance (CDR table 3.4)
+18x275_hiacc: {steering: dis_eicBeam_hiAcc_18x275, config: 2, preset: ip6_hiacc_275x18}
+10x275_hiacc: {steering: dis_eicBeam_hiAcc_10x275, config: 2, preset: ip6_hiacc_275x10, ci: true}
+10x100_hiacc: {steering: dis_eicBeam_hiAcc_10x100, config: 2, preset: ip6_hiacc_100x10}
+5x100_hiacc:  {steering: dis_eicBeam_hiAcc_5x100,  config: 2, preset: ip6_hiacc_100x5}
+5x41_hiacc:   {steering: dis_eicBeam_hiAcc_5x41,   config: 2, preset: ip6_hiacc_41x5}
+
+# --- e+Au optics (CDR table 3.5); Pythia8 runs e+p at the per-nucleon energy
+18x110_eA: {steering: dis_eicBeam_eA_18x110, config: 3, preset: ip6_eAu_110x18, ci: true}
+10x110_eA: {steering: dis_eicBeam_eA_10x110, config: 3, preset: ip6_eAu_110x10}
+5x110_eA:  {steering: dis_eicBeam_eA_5x110,  config: 3, preset: ip6_eAu_110x5}
+5x41_eA:   {steering: dis_eicBeam_eA_5x41,   config: 3, preset: ip6_eAu_41x5}
+
+# --- early science (2026). abconv's ip6_ep_130x* and ip6_ep_250x10 presets carry the
+# high-acceptance parameters of 10x100 and 10x275; eicBeamShape copies the same sets ("copy").
+10x130_hiacc: {steering: dis_eicBeam_hiAcc_10x100, config: 2, preset: ip6_ep_130x10, ci: true}  # copy of 10x100
+9x130_hiacc:  {steering: dis_eicBeam_hiAcc_10x100, config: 2, preset: ip6_ep_130x9}             # copy of 10x100
+10x250_hiacc: {steering: dis_eicBeam_hiAcc_10x275, config: 2, preset: ip6_ep_250x10}            # copy of 10x275
+9x275_hidiv:  {steering: dis_eicBeam_hiDiv_9x275_10to100, config: 1, preset: ip6_hidiv_275x9}
+9x275_hiacc:  {steering: dis_eicBeam_hiAcc_10x275, config: 2, preset: ip6_hiacc_275x9}          # copy of 10x275

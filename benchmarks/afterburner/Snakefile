@@ -1,0 +1,318 @@
+# Afterburner benchmark: abconv on head-on Pythia8 against Pythia8 + eicBeamShape.
+#
+# For every setup of setups.yml (beam energies x beam regime) one steering file and one seed give
+#   py8_full     Pythia8 with eicBeamShape beam effects (crossing angle -25 mrad)   the reference
+#   py8_headon   the same without momentum and vertex spread                       abconv's input
+# and abconv turns py8_headon into the afterburner sample. The scripts compare the two beam-effects
+# samples event by event (geometry), through abconv's validation histograms (distributions), in the
+# displaced decay vertices, and in how abconv's beam configurations depend on the input (seed).
+#
+#   snakemake --cores 4 afterburner                                   CI selection, 2000 events
+#   snakemake --cores 8 afterburner --config AFTERBURNER_SETUPS=all AFTERBURNER_N_EVENTS=50000
+#   snakemake --cores 4 results/afterburner/10x100_hidiv/report.md    one setup
+#
+# See README.md for the options and the outputs.
+
+import re
+
+import yaml
+
+AFTERBURNER_DIR = "benchmarks/afterburner"
+with open(f"{AFTERBURNER_DIR}/setups.yml") as _f:
+    AFTERBURNER_SETUPS = yaml.safe_load(_f)
+
+AFTERBURNER_N_EVENTS = int(config.get("AFTERBURNER_N_EVENTS", 2000))
+AFTERBURNER_N_SEED_CHECK = int(config.get("AFTERBURNER_N_SEED_CHECK", min(1000, AFTERBURNER_N_EVENTS)))
+AFTERBURNER_SEED = int(config.get("AFTERBURNER_SEED", config.get("BENCHMARK_RNG_SEED", 1)))
+# eicSimuBeamEffects ref of the steering files; keep it at the version the container ships
+AFTERBURNER_STEERING_REF = config.get("AFTERBURNER_STEERING_REF", "v1.1")
+# IP6 crossing angle for eicBeamShape: negative (eicSimuBeamEffects Pythia8/README.md)
+AFTERBURNER_XANGLE = -0.025
+
+
+def afterburner_selection():
+    sel = str(config.get("AFTERBURNER_SETUPS", "ci"))
+    if sel == "ci":
+        return [k for k, v in AFTERBURNER_SETUPS.items() if v.get("ci")]
+    if sel == "all":
+        return list(AFTERBURNER_SETUPS)
+    names = [s.strip() for s in sel.split(",") if s.strip()]
+    unknown = [s for s in names if s not in AFTERBURNER_SETUPS]
+    if unknown:
+        raise ValueError(f"AFTERBURNER_SETUPS: unknown setups {unknown}; see {AFTERBURNER_DIR}/setups.yml")
+    return names
+
+
+def afterburner_beams(setup):
+    ebeam, pbeam = re.match(r"(\d+)x(\d+)_", setup).groups()
+    return int(ebeam), int(pbeam)
+
+
+wildcard_constraints:
+    SETUP="|".join(re.escape(k) for k in AFTERBURNER_SETUPS),
+
+
+rule afterburner_fetch_steering:
+    output:
+        "sim_output/afterburner/steerFiles/{STEERING}",
+    params:
+        url=lambda w: f"https://raw.githubusercontent.com/eic/eicSimuBeamEffects/{AFTERBURNER_STEERING_REF}/Pythia8/steerFiles/{w.STEERING}",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+curl -fsSL --retry 3 --output {output} {params.url}
+"""
+
+
+rule afterburner_steering:
+    """The setup's steering file with the benchmark's overrides appended (later settings win)."""
+    input:
+        lambda w: f"sim_output/afterburner/steerFiles/{AFTERBURNER_SETUPS[w.SETUP]['steering']}",
+    output:
+        "sim_output/afterburner/{SETUP}/{SAMPLE}.cmnd",
+    wildcard_constraints:
+        SAMPLE="full|headon|full_s2|headon_s2",
+    params:
+        setup=lambda w: w.SETUP,
+        nevents=lambda w: AFTERBURNER_N_SEED_CHECK if w.SAMPLE.endswith("_s2") else AFTERBURNER_N_EVENTS,
+        seed=lambda w: AFTERBURNER_SEED + 1 if w.SAMPLE.endswith("_s2") else AFTERBURNER_SEED,
+        ebeam=lambda w: afterburner_beams(w.SETUP)[0],
+        pbeam=lambda w: afterburner_beams(w.SETUP)[1],
+        spread=lambda w: "off" if w.SAMPLE.startswith("headon") else "on",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+{{
+  cat {input}
+  cat <<EOF
+
+! afterburner benchmark overrides ({params.setup}, {wildcards.SAMPLE})
+Main:numberOfEvents = {params.nevents}
+Random:setSeed = on
+Random:seed = {params.seed}
+Beams:eA = {params.pbeam}
+Beams:eB = {params.ebeam}
+Beams:allowMomentumSpread = {params.spread}
+Beams:allowVertexSpread = {params.spread}
+EOF
+}} > {output}
+"""
+
+
+rule afterburner_pythia8:
+    input:
+        "sim_output/afterburner/{SETUP}/{SAMPLE}.cmnd",
+    output:
+        hepmc="sim_output/afterburner/{SETUP}/py8_{SAMPLE}.hepmc",
+        qa="sim_output/afterburner/{SETUP}/py8_{SAMPLE}.qa.root",
+    log:
+        "logs/afterburner/{SETUP}/py8_{SAMPLE}.log",
+    wildcard_constraints:
+        SAMPLE="full|headon|full_s2|headon_s2",
+    params:
+        config=lambda w: AFTERBURNER_SETUPS[w.SETUP]["config"],
+        ebeam=lambda w: afterburner_beams(w.SETUP)[0],
+        pbeam=lambda w: afterburner_beams(w.SETUP)[1],
+        xangle=AFTERBURNER_XANGLE,
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+runBeamShapeHepMC {input} {params.config} {params.pbeam} {params.ebeam} {params.xangle} {output.qa} {output.hepmc} > {log} 2>&1
+"""
+
+
+rule afterburner_abconv:
+    """abconv with the setup's preset on the head-on file: events and validation histograms."""
+    input:
+        "sim_output/afterburner/{SETUP}/py8_headon.hepmc",
+    output:
+        hepmc="sim_output/afterburner/{SETUP}/afterburner.hepmc",
+        hist="sim_output/afterburner/{SETUP}/afterburner.hist.root",
+    log:
+        "logs/afterburner/{SETUP}/abconv.log",
+    params:
+        preset=lambda w: AFTERBURNER_SETUPS[w.SETUP]["preset"],
+        base=lambda w: f"sim_output/afterburner/{w.SETUP}/afterburner",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+abconv {input} -p {params.preset} -f hepmc3 -o {params.base} > {log} 2>&1
+"""
+
+
+rule afterburner_abconv_seed:
+    """abconv on the head-on file of the second Pythia8 seed (seed check)."""
+    input:
+        "sim_output/afterburner/{SETUP}/py8_headon_s2.hepmc",
+    output:
+        "sim_output/afterburner/{SETUP}/afterburner_s2.hepmc",
+    log:
+        "logs/afterburner/{SETUP}/abconv_s2.log",
+    params:
+        preset=lambda w: AFTERBURNER_SETUPS[w.SETUP]["preset"],
+        base=lambda w: f"sim_output/afterburner/{w.SETUP}/afterburner_s2",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+abconv {input} -p {params.preset} -f hepmc3 --plot-off -o {params.base} > {log} 2>&1
+"""
+
+
+rule afterburner_abconv_histograms:
+    """abconv's validation histograms of a Pythia8 file without applying the afterburner."""
+    input:
+        lambda w: f"sim_output/afterburner/{w.SETUP}/py8_{'headon' if w.SAMPLE == 'nominal' else 'full'}.hepmc",
+    output:
+        "sim_output/afterburner/{SETUP}/{SAMPLE}.hist.root",
+    log:
+        "logs/afterburner/{SETUP}/abconv_{SAMPLE}.log",
+    wildcard_constraints:
+        SAMPLE="nominal|pythia8",
+    params:
+        base=lambda w: f"sim_output/afterburner/{w.SETUP}/{w.SAMPLE}",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+abconv {input} --ab-off -f none -o {params.base} > {log} 2>&1
+"""
+
+
+rule afterburner_geometry:
+    input:
+        afterburner="sim_output/afterburner/{SETUP}/afterburner.hepmc",
+        pythia8="sim_output/afterburner/{SETUP}/py8_full.hepmc",
+        script=f"{AFTERBURNER_DIR}/scripts/geometry.py",
+    output:
+        "results/afterburner/{SETUP}/geometry.json",
+        "results/afterburner/{SETUP}/geometry.png",
+    params:
+        ebeam=lambda w: afterburner_beams(w.SETUP)[0],
+        pbeam=lambda w: afterburner_beams(w.SETUP)[1],
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --afterburner {input.afterburner} --pythia8 {input.pythia8} \
+  --ebeam {params.ebeam} --pbeam {params.pbeam} --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
+"""
+
+
+rule afterburner_distributions:
+    input:
+        nominal="sim_output/afterburner/{SETUP}/nominal.hist.root",
+        afterburner="sim_output/afterburner/{SETUP}/afterburner.hist.root",
+        pythia8="sim_output/afterburner/{SETUP}/pythia8.hist.root",
+        script=f"{AFTERBURNER_DIR}/scripts/distributions.py",
+    output:
+        "results/afterburner/{SETUP}/distributions.json",
+        "results/afterburner/{SETUP}/distributions.png",
+    params:
+        title=lambda w: f"abconv -p {AFTERBURNER_SETUPS[w.SETUP]['preset']}, {AFTERBURNER_N_EVENTS} events, seed {AFTERBURNER_SEED}",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --nominal {input.nominal} --afterburner {input.afterburner} --pythia8 {input.pythia8} \
+  --setup {wildcards.SETUP} --title "{params.title}" --out results/afterburner/{wildcards.SETUP}
+"""
+
+
+rule afterburner_vertices:
+    input:
+        headon="sim_output/afterburner/{SETUP}/py8_headon.hepmc",
+        pythia8="sim_output/afterburner/{SETUP}/py8_full.hepmc",
+        afterburner="sim_output/afterburner/{SETUP}/afterburner.hepmc",
+        script=f"{AFTERBURNER_DIR}/scripts/vertices.py",
+    output:
+        "results/afterburner/{SETUP}/vertices.json",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --headon {input.headon} --pythia8 {input.pythia8} --afterburner {input.afterburner} \
+  --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
+"""
+
+
+rule afterburner_seed:
+    input:
+        afterburner_a="sim_output/afterburner/{SETUP}/afterburner.hepmc",
+        afterburner_b="sim_output/afterburner/{SETUP}/afterburner_s2.hepmc",
+        pythia8_a="sim_output/afterburner/{SETUP}/py8_full.hepmc",
+        pythia8_b="sim_output/afterburner/{SETUP}/py8_full_s2.hepmc",
+        script=f"{AFTERBURNER_DIR}/scripts/seed.py",
+    output:
+        "results/afterburner/{SETUP}/seed.json",
+    params:
+        nevents=AFTERBURNER_N_SEED_CHECK,
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --afterburner-a {input.afterburner_a} --afterburner-b {input.afterburner_b} \
+  --pythia8-a {input.pythia8_a} --pythia8-b {input.pythia8_b} --events {params.nevents} \
+  --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
+"""
+
+
+rule afterburner_report:
+    input:
+        "results/afterburner/{SETUP}/geometry.json",
+        "results/afterburner/{SETUP}/distributions.json",
+        "results/afterburner/{SETUP}/vertices.json",
+        "results/afterburner/{SETUP}/seed.json",
+        script=f"{AFTERBURNER_DIR}/scripts/report.py",
+    output:
+        "results/afterburner/{SETUP}/report.md",
+        "results/afterburner/{SETUP}/tests.json",
+    params:
+        preset=lambda w: AFTERBURNER_SETUPS[w.SETUP]["preset"],
+        steering=lambda w: AFTERBURNER_SETUPS[w.SETUP]["steering"],
+        config=lambda w: AFTERBURNER_SETUPS[w.SETUP]["config"],
+        nevents=AFTERBURNER_N_EVENTS,
+        seed=AFTERBURNER_SEED,
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --dir results/afterburner/{wildcards.SETUP} --setup {wildcards.SETUP} \
+  --preset {params.preset} --steering {params.steering} --config {params.config} \
+  --events {params.nevents} --seed {params.seed}
+"""
+
+
+rule afterburner_versions:
+    output:
+        "results/afterburner/versions.txt",
+    params:
+        steering_ref=AFTERBURNER_STEERING_REF,
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+{{
+  echo "abconv --version: $(abconv --version 2>&1 | head -n 1)"
+  echo "pythia8-config --version: $(pythia8-config --version 2>&1 | head -n 1)"
+  echo "eicSimuBeamEffects steering files: {params.steering_ref}"
+  echo "container (/etc/jug_info):"
+  head -n 20 /etc/jug_info 2>/dev/null || echo "  (not found)"
+}} > {output}
+"""
+
+
+rule afterburner_summary:
+    input:
+        lambda w: expand("results/afterburner/{SETUP}/report.md", SETUP=afterburner_selection()),
+        "results/afterburner/versions.txt",
+        definition=f"{AFTERBURNER_DIR}/benchmark.json",
+        script=f"{AFTERBURNER_DIR}/scripts/summary.py",
+    output:
+        "results/afterburner/summary.md",
+        "results/afterburner.json",
+    params:
+        setups=lambda w: " ".join(afterburner_selection()),
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 {input.script} --benchmark {input.definition} --results results/afterburner \
+  --output results/afterburner.json {params.setups}
+"""
+
+
+rule afterburner:
+    """Entry point: every selected setup, summarized in results/afterburner/summary.md."""
+    input:
+        "results/afterburner/summary.md",
+    message:
+        "See results/afterburner/summary.md"
+
+
+rule afterburner_check:
+    """Fail (non-zero exit) unless the benchmark result is pass; CI runs it allowed to fail."""
+    input:
+        "results/afterburner.json",
+    singularity: EIC_SINGULARITY_CONTAINER
+    shell: """
+python3 -c 'import json, sys; r = json.load(open("{input}")); print(r["result"], r["n_pass"], "of", r["n_tests"]); sys.exit(r["result"] != "pass")'
+"""

@@ -1,0 +1,6 @@
+{
+  "name": "afterburner",
+  "title": "Afterburner vs Pythia8 beam effects",
+  "description": "abconv on head-on Pythia8 against Pythia8 + eicBeamShape (same steering and seed): beam directions, divergences, luminous region, crossing geometry of the interaction point, crab kicks, displaced decay vertices, seed dependence",
+  "target": "1.0"
+}
