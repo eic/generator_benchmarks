@@ -62,6 +62,7 @@ tolerances. Test names carry the quantity's unit, for example
 | `scripts/seed.py` | seed dependence of abconv and of Pythia8 |
 | `scripts/report.py` | per-setup `report.md` and `tests.json` (common_bench test format) |
 | `scripts/summary.py` | `summary.md` over all setups and `results/afterburner.json` |
+| `scripts/check.py` | exits non-zero unless the benchmark result is pass (CI collect job) |
 
 ## Setups
 
@@ -216,5 +217,8 @@ Information worth knowing:
   length) and 14—26 ps with x added. A (z, x) estimator fitted on Pythia8 gives
   30—51 ps on abconv samples, worse than z alone, because of the IP sign.
 
-The collect job is therefore `allow_failure: true`: `afterburner_check` exits
-non-zero while the benchmark result is fail, without blocking the pipeline.
+The collect job is therefore `allow_failure: true`: `scripts/check.py` exits
+non-zero while the benchmark result is fail, without blocking the pipeline. The
+job reads the benchmark job's `results/` artifacts without Snakemake: in a fresh
+checkout the scripts are newer than `results/`, and Snakemake would rerun the
+whole benchmark there.

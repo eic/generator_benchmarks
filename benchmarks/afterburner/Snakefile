@@ -324,10 +324,9 @@ rule afterburner:
 
 
 rule afterburner_check:
-    """Fail (non-zero exit) unless the benchmark result is pass; CI runs it allowed to fail."""
+    """Fail (non-zero exit) unless the benchmark result is pass. The CI collect job runs check.py directly."""
     input:
-        "results/afterburner.json",
+        result="results/afterburner.json",
+        script=f"{AFTERBURNER_DIR}/scripts/check.py",
     singularity: EIC_SINGULARITY_CONTAINER
-    shell: """
-python3 -c 'import json, sys; r = json.load(open("{input}")); print(r["result"], r["n_pass"], "of", r["n_tests"]); sys.exit(r["result"] != "pass")'
-"""
+    shell: "python3 {input.script} {input.result}"

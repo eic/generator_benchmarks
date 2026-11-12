@@ -13,6 +13,8 @@ collect_results:afterburner:
   # abconv 0.2.1 fails known checks (crossing geometry of the interaction point, displaced vertices,
   # seed); the job shows the benchmark result without blocking the pipeline
   allow_failure: true
+  # Reads the benchmark job's results/ artifacts without Snakemake: in a fresh checkout the scripts are
+  # newer than results/, and Snakemake would rerun the whole benchmark here on one core.
   script:
-    - snakemake $SNAKEMAKE_FLAGS --cores 1 afterburner_check
     - cat results/afterburner/summary.md
+    - python3 benchmarks/afterburner/scripts/check.py results/afterburner.json
