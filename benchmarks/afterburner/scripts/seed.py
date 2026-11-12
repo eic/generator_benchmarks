@@ -6,8 +6,8 @@ seeds s and s+1) can repeat the same interaction points and beam four-vectors ev
 Pythia8 + eicBeamShape draws them from Pythia8's generator, which follows Random:seed: the control.
 
 Writes <out>/seed.json.
-  seed.py --afterburner-a A1.hepmc --afterburner-b A2.hepmc --pythia8-a P1.hepmc --pythia8-b P2.hepmc
-          --events N --setup S --out DIR
+  seed.py --afterburner A.hepmc --afterburner-next-seed A_next.hepmc \
+          --pythia8 P.hepmc --pythia8-next-seed P_next.hepmc --events N --setup S --out DIR
 """
 import argparse
 import json
@@ -17,35 +17,41 @@ import numpy as np
 
 from hepmc_text import read_beams
 
+# HepMC3 text keeps about 10 significant digits; equal draws agree far below this.
+TOLERANCE = 1e-9
 
-def identical(f1, f2, n):
-    """Events whose IP and both beam four-vectors agree to 1e-9 (rounding of the text format)."""
-    (ip1, h1, e1), (ip2, h2, e2) = read_beams(f1, n), read_beams(f2, n)
-    m = min(len(ip1), len(ip2))
 
-    def same(a, b):
-        return np.all(np.isclose(a[:m], b[:m], rtol=1e-9, atol=1e-9), axis=1)
+def repeated_configurations(path, next_seed_path, n_events):
+    """Events in which the IP and both beam four-vectors of the two files agree."""
+    ip, hadron, electron = read_beams(path, n_events)
+    next_ip, next_hadron, next_electron = read_beams(next_seed_path, n_events)
+    n_compared = min(len(ip), len(next_ip))
 
-    same_ip = same(ip1, ip2)
-    same_beams = same(h1[:, 1:], h2[:, 1:]) & same(e1[:, 1:], e2[:, 1:])
-    return {"events": int(m), "same_ip": int(same_ip.sum()), "same_beams": int(same_beams.sum()),
-            "same_ip_fraction": float(same_ip.mean()) if m else None}
+    def same(values, next_values):
+        return np.all(np.isclose(values[:n_compared], next_values[:n_compared], rtol=TOLERANCE, atol=TOLERANCE), axis=1)
+
+    same_ip = same(ip, next_ip)
+    same_beams = same(hadron[:, 1:], next_hadron[:, 1:]) & same(electron[:, 1:], next_electron[:, 1:])
+    return {"events": int(n_compared), "same_ip": int(same_ip.sum()), "same_beams": int(same_beams.sum()),
+            "same_ip_fraction": float(same_ip.mean()) if n_compared else None}
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    for s in ("afterburner-a", "afterburner-b", "pythia8-a", "pythia8-b"):
-        ap.add_argument(f"--{s}", required=True)
-    ap.add_argument("--events", type=int, required=True)
-    ap.add_argument("--setup", required=True)
-    ap.add_argument("--out", required=True)
-    a = ap.parse_args()
-    out = Path(a.out)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--afterburner", required=True, help="abconv on head-on Pythia8, seed s")
+    parser.add_argument("--afterburner-next-seed", required=True, help="abconv on head-on Pythia8, seed s+1")
+    parser.add_argument("--pythia8", required=True, help="Pythia8 + eicBeamShape, seed s")
+    parser.add_argument("--pythia8-next-seed", required=True, help="Pythia8 + eicBeamShape, seed s+1")
+    parser.add_argument("--events", type=int, required=True, help="events compared per file pair")
+    parser.add_argument("--setup", required=True)
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args()
+    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    res = {"setup": a.setup,
-           "afterburner": identical(a.afterburner_a, a.afterburner_b, a.events),
-           "pythia8": identical(a.pythia8_a, a.pythia8_b, a.events)}
-    (out / "seed.json").write_text(json.dumps(res, indent=1))
+    result = {"setup": args.setup,
+              "afterburner": repeated_configurations(args.afterburner, args.afterburner_next_seed, args.events),
+              "pythia8": repeated_configurations(args.pythia8, args.pythia8_next_seed, args.events)}
+    (out / "seed.json").write_text(json.dumps(result, indent=1))
 
 
 if __name__ == "__main__":

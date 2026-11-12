@@ -54,4 +54,4 @@ benchmarks/backgrounds/ecal_backwards.py
 benchmarks/ecal_gaps/ecal_gaps.py
 
 # benchmark logs
-logs/
+/logs/

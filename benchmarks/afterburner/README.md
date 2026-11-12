@@ -21,11 +21,16 @@ difference is a difference of the beam-effects models. The checks:
   its bunch, z + ct) and the crab kicks (beam angle against the bunch position).
   Both codes set ct = (z_e − z_h)/2 and z = (z_e + z_h)/2 from the two bunch
   positions, so the slopes show which crossing geometry each part was built in.
+  The figure draws the reference geometry, x = (θ/2)(z + ct) with θ = −25 mrad.
 * **Validation histograms** (`distributions.json`, `distributions.png`): abconv's
   own histograms of the three samples, overlaid with the ratio, as in
   `afterburner/python/comparison.ipynb`. Information only.
-* **Displaced vertices** (`vertices.json`): decays more than 1 mm from their
-  production vertex must point along the parent's momentum after the transform.
+* **Displaced vertices** (`vertices.json`, `vertices.png`): decays more than 1 mm
+  from their production vertex must point along the parent's momentum after the
+  transform. The figure shows the angle between displacement and momentum, that
+  angle against the momentum direction (a transform applied to momenta only gives
+  (|θ|/2)(1 + cos θ_p): the full crossing angle forward, none backward), and the
+  distance of the decay vertex from the parent's flight line.
 * **Seed** (`seed.json`): abconv runs on head-on files with different Pythia8
   seeds must not repeat the same beam configurations.
 * **Collision time from the vertex** (in `geometry.json`): how well a linear fit
@@ -37,7 +42,8 @@ A check passes when the afterburner value agrees with the Pythia8 value within
 horizontal beam directions, 5 % for vertical ones, 3 % for widths, 5 % for
 slopes. This floor keeps large samples from flagging tiny differences.
 `scripts/verdict.py` holds the rule, and `scripts/geometry.py` (`CHECKS`) the
-tolerances.
+tolerances. Test names carry the quantity's unit, for example
+`afterburner_10x100_hidiv_ip_x_rms_um` (µ written as u).
 
 ## Layout
 
@@ -48,6 +54,8 @@ tolerances.
 | `config.yml` | GitLab CI jobs |
 | `benchmark.json` | benchmark definition (name, target pass fraction) |
 | `scripts/hepmc_text.py` | HepMC3 text readers (numpy only) |
+| `scripts/verdict.py` | the comparison rule of every check |
+| `scripts/figures.py` | sample names, colors and the binned profile shared by the figures |
 | `scripts/geometry.py` | beam geometry, crossing slopes, crab kicks, collision time |
 | `scripts/distributions.py` | abconv validation histograms, overlays and ratios |
 | `scripts/vertices.py` | displaced decay vertices |
@@ -133,7 +141,7 @@ Options (`--config KEY=VALUE`):
 | --- | --- | --- |
 | `AFTERBURNER_SETUPS` | `ci` | `ci`, `all`, or a comma-separated list of setup names |
 | `AFTERBURNER_N_EVENTS` | 2000 | events per Pythia8 sample |
-| `AFTERBURNER_N_SEED_CHECK` | min(1000, N) | events of the second-seed samples |
+| `AFTERBURNER_N_SEED_CHECK` | min(1000, N) | events of the next-seed samples (`*_next_seed`, seed + 1) |
 | `AFTERBURNER_SEED` | `BENCHMARK_RNG_SEED` (1) | Pythia8 seed; the seed check uses seed + 1 |
 | `AFTERBURNER_STEERING_REF` | `v1.1` | eicSimuBeamEffects ref of the steering files; keep it at the version the container ships, since eicBeamShape stops on steering values it does not expect |
 
@@ -141,11 +149,11 @@ Changing an option re-runs the affected rules (Snakemake tracks the parameters).
 
 For orientation (eic_xl 26.11.0-stable on a 24-core workstation):
 
-* the CI selection (6 setups, 2000 events) takes 1–2 minutes on 6 cores;
-* all 19 setups at 20000 events take 5 minutes on 10 cores.
+* the CI selection (6 setups, 2000 events) takes 1—2 minutes on 6 cores;
+* all 19 setups at 50000 events take 4 minutes on 22 cores.
 
-The HepMC3 text files take about 25 MB per 1000 events per setup in
-`sim_output/` (9 GB for the full matrix at 20000 events).
+The HepMC3 text files take about 23 MB per 1000 events per setup in
+`sim_output/` (22 GB for the full matrix at 50000 events).
 
 ## Outputs
 
@@ -155,7 +163,8 @@ The HepMC3 text files take about 25 MB per 1000 events per setup in
 | `results/afterburner.json` | benchmark result: every test, pass fraction, pass/fail against `target` |
 | `results/afterburner/<setup>/report.md` | the setup's tables and figures |
 | `results/afterburner/<setup>/tests.json` | the setup's checks, common_bench test format |
-| `results/afterburner/<setup>/geometry.png` | profiles: IP x vs z + ct, hadron and electron crab kicks |
+| `results/afterburner/<setup>/geometry.png` | profiles: IP x vs z + ct with the reference x = (θ/2)(z + ct), hadron and electron crab kicks |
+| `results/afterburner/<setup>/vertices.png` | displaced decay vertices: angle(d, p), against cos θ, distance from the flight line |
 | `results/afterburner/<setup>/distributions.png` | abconv validation histograms and ratios |
 | `results/afterburner/versions.txt` | abconv, Pythia8 and container versions |
 | `sim_output/afterburner/<setup>/` | steering files, HepMC3 samples, abconv histogram files |
@@ -166,7 +175,7 @@ The analysis scripts run on any HepMC3 text files; see each script's `--help`.
 ## Status
 
 Written against eic_xl 26.11.0-stable (abconv 0.2.1, Pythia8 8.316,
-eicSimuBeamEffects 1.1). With all 19 setups at 20000 events, 260 of 361
+eicSimuBeamEffects 1.1). With all 19 setups at 50000 events, 260 of 361
 checks pass.
 
 What agrees in every setup:
@@ -178,24 +187,24 @@ What agrees in every setup:
 
 What fails:
 
-* **Interaction point crossing slope: opposite sign, every setup.** abconv
-  gives IP x = +(θ/2)(z + ct), Pythia8 −(θ/2)(z + ct): +12.6…+12.9 against
-  −12.2…−12.7 mrad. abconv builds the IP in the configured +25 mrad frame,
+* **Interaction point crossing slope: opposite sign, every setup.** With
+  θ = −25 mrad, Pythia8 gives IP x = (θ/2)(z + ct) and abconv −(θ/2)(z + ct):
+  −12.4…−12.6 against +12.5…+12.6 mrad. abconv builds the IP in the configured +25 mrad frame,
   while its beams leave at −25 mrad like Pythia8's. The IP code is
   eicBeamShape's, run with the opposite angle.
 * **Beam energy spread: absent, every setup.** abconv applies none; the
-  relative rms is 1–6 × 10⁻⁶, from the angles alone. Pythia8 applies
-  (6–11) × 10⁻⁴ as set in the steering files. This stays a failing check, not
+  relative rms is 0.7—6 × 10⁻⁶, from the angles alone. Pythia8 applies
+  (6—11) × 10⁻⁴ as set in the steering files. This stays a failing check, not
   information: the spread is part of the beam effects abconv is meant to
   reproduce (38 of the 101 failures).
 * **Displaced vertices: misaligned, every setup.** Decay vertices stay in the
   head-on frame, 25 mrad off their momenta. afterburner PR #38 fixes this.
 * **Seed: repeated, every setup.** The smearer has a fixed seed, so abconv runs
   on different inputs repeat the same interaction points and beam four-vectors.
-* **Vertical luminous width: 4–8 % apart in 6 setups** (10x100 both regimes,
+* **Vertical luminous width: 3—9 % apart in 6 setups** (10x100 both regimes,
   18x275 hidiv, the eA setups except 18x110). abconv computes it from β*·ε of
   the two beams; eicBeamShape takes the steering file's `sigmaVertexY` (the CDR
-  tables). For example, 10x100_hidiv gives 8.70 µm in abconv and 8.04 µm in
+  tables). For example, 10x100_hidiv gives 8.72 µm in abconv and 8.02 µm in
   Pythia8.
 
 Information worth knowing:
@@ -203,9 +212,9 @@ Information worth knowing:
 * abconv shifts the beam energies, by the same amount in every setup: hadron
   +2.34 × 10⁻⁴, electron −0.78 × 10⁻⁴. Together they make θ²/4. Pythia8 does
   not shift them.
-* A vertex-based collision time is 23–30 ps from z alone (the electron bunch
-  length) and 14–26 ps with x added. A (z, x) estimator fitted on Pythia8 gives
-  30–50 ps on abconv samples, worse than z alone, because of the IP sign.
+* A vertex-based collision time is 23—30 ps from z alone (the electron bunch
+  length) and 14—26 ps with x added. A (z, x) estimator fitted on Pythia8 gives
+  30—51 ps on abconv samples, worse than z alone, because of the IP sign.
 
 The collect job is therefore `allow_failure: true`: `afterburner_check` exits
 non-zero while the benchmark result is fail, without blocking the pipeline.

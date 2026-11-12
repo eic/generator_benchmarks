@@ -18,26 +18,29 @@ import re
 import yaml
 
 AFTERBURNER_DIR = "benchmarks/afterburner"
-with open(f"{AFTERBURNER_DIR}/setups.yml") as _f:
-    AFTERBURNER_SETUPS = yaml.safe_load(_f)
+with open(f"{AFTERBURNER_DIR}/setups.yml") as setups_file:
+    AFTERBURNER_SETUPS = yaml.safe_load(setups_file)
+# Modules the analysis scripts import: an input of every analysis rule, so a fix in them reruns the analysis.
+AFTERBURNER_SHARED_SCRIPTS = [f"{AFTERBURNER_DIR}/scripts/{name}.py" for name in ("hepmc_text", "verdict", "figures")]
 
 AFTERBURNER_N_EVENTS = int(config.get("AFTERBURNER_N_EVENTS", 2000))
 AFTERBURNER_N_SEED_CHECK = int(config.get("AFTERBURNER_N_SEED_CHECK", min(1000, AFTERBURNER_N_EVENTS)))
 AFTERBURNER_SEED = int(config.get("AFTERBURNER_SEED", config.get("BENCHMARK_RNG_SEED", 1)))
 # eicSimuBeamEffects ref of the steering files; keep it at the version the container ships
 AFTERBURNER_STEERING_REF = config.get("AFTERBURNER_STEERING_REF", "v1.1")
-# IP6 crossing angle for eicBeamShape: negative (eicSimuBeamEffects Pythia8/README.md)
+# IP6 crossing angle [rad]: eicBeamShape's argument, negative (eicSimuBeamEffects Pythia8/README.md),
+# and the reference geometry the analysis scripts draw
 AFTERBURNER_XANGLE = -0.025
 
 
 def afterburner_selection():
-    sel = str(config.get("AFTERBURNER_SETUPS", "ci"))
-    if sel == "ci":
-        return [k for k, v in AFTERBURNER_SETUPS.items() if v.get("ci")]
-    if sel == "all":
+    selection = str(config.get("AFTERBURNER_SETUPS", "ci"))
+    if selection == "ci":
+        return [setup for setup, options in AFTERBURNER_SETUPS.items() if options.get("ci")]
+    if selection == "all":
         return list(AFTERBURNER_SETUPS)
-    names = [s.strip() for s in sel.split(",") if s.strip()]
-    unknown = [s for s in names if s not in AFTERBURNER_SETUPS]
+    names = [name.strip() for name in selection.split(",") if name.strip()]
+    unknown = [name for name in names if name not in AFTERBURNER_SETUPS]
     if unknown:
         raise ValueError(f"AFTERBURNER_SETUPS: unknown setups {unknown}; see {AFTERBURNER_DIR}/setups.yml")
     return names
@@ -70,11 +73,11 @@ rule afterburner_steering:
     output:
         "sim_output/afterburner/{SETUP}/{SAMPLE}.cmnd",
     wildcard_constraints:
-        SAMPLE="full|headon|full_s2|headon_s2",
+        SAMPLE="full|headon|full_next_seed|headon_next_seed",
     params:
         setup=lambda w: w.SETUP,
-        nevents=lambda w: AFTERBURNER_N_SEED_CHECK if w.SAMPLE.endswith("_s2") else AFTERBURNER_N_EVENTS,
-        seed=lambda w: AFTERBURNER_SEED + 1 if w.SAMPLE.endswith("_s2") else AFTERBURNER_SEED,
+        nevents=lambda w: AFTERBURNER_N_SEED_CHECK if w.SAMPLE.endswith("_next_seed") else AFTERBURNER_N_EVENTS,
+        seed=lambda w: AFTERBURNER_SEED + 1 if w.SAMPLE.endswith("_next_seed") else AFTERBURNER_SEED,
         ebeam=lambda w: afterburner_beams(w.SETUP)[0],
         pbeam=lambda w: afterburner_beams(w.SETUP)[1],
         spread=lambda w: "off" if w.SAMPLE.startswith("headon") else "on",
@@ -106,7 +109,7 @@ rule afterburner_pythia8:
     log:
         "logs/afterburner/{SETUP}/py8_{SAMPLE}.log",
     wildcard_constraints:
-        SAMPLE="full|headon|full_s2|headon_s2",
+        SAMPLE="full|headon|full_next_seed|headon_next_seed",
     params:
         config=lambda w: AFTERBURNER_SETUPS[w.SETUP]["config"],
         ebeam=lambda w: afterburner_beams(w.SETUP)[0],
@@ -137,16 +140,16 @@ abconv {input} -p {params.preset} -f hepmc3 -o {params.base} > {log} 2>&1
 
 
 rule afterburner_abconv_seed:
-    """abconv on the head-on file of the second Pythia8 seed (seed check)."""
+    """abconv on the head-on file of the next Pythia8 seed (seed check)."""
     input:
-        "sim_output/afterburner/{SETUP}/py8_headon_s2.hepmc",
+        "sim_output/afterburner/{SETUP}/py8_headon_next_seed.hepmc",
     output:
-        "sim_output/afterburner/{SETUP}/afterburner_s2.hepmc",
+        "sim_output/afterburner/{SETUP}/afterburner_next_seed.hepmc",
     log:
-        "logs/afterburner/{SETUP}/abconv_s2.log",
+        "logs/afterburner/{SETUP}/abconv_next_seed.log",
     params:
         preset=lambda w: AFTERBURNER_SETUPS[w.SETUP]["preset"],
-        base=lambda w: f"sim_output/afterburner/{w.SETUP}/afterburner_s2",
+        base=lambda w: f"sim_output/afterburner/{w.SETUP}/afterburner_next_seed",
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
 abconv {input} -p {params.preset} -f hepmc3 --plot-off -o {params.base} > {log} 2>&1
@@ -156,13 +159,13 @@ abconv {input} -p {params.preset} -f hepmc3 --plot-off -o {params.base} > {log} 
 rule afterburner_abconv_histograms:
     """abconv's validation histograms of a Pythia8 file without applying the afterburner."""
     input:
-        lambda w: f"sim_output/afterburner/{w.SETUP}/py8_{'headon' if w.SAMPLE == 'nominal' else 'full'}.hepmc",
+        lambda w: f"sim_output/afterburner/{w.SETUP}/py8_{'headon' if w.SAMPLE == 'headon' else 'full'}.hepmc",
     output:
         "sim_output/afterburner/{SETUP}/{SAMPLE}.hist.root",
     log:
         "logs/afterburner/{SETUP}/abconv_{SAMPLE}.log",
     wildcard_constraints:
-        SAMPLE="nominal|pythia8",
+        SAMPLE="headon|pythia8",
     params:
         base=lambda w: f"sim_output/afterburner/{w.SETUP}/{w.SAMPLE}",
     singularity: EIC_SINGULARITY_CONTAINER
@@ -176,25 +179,29 @@ rule afterburner_geometry:
         afterburner="sim_output/afterburner/{SETUP}/afterburner.hepmc",
         pythia8="sim_output/afterburner/{SETUP}/py8_full.hepmc",
         script=f"{AFTERBURNER_DIR}/scripts/geometry.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/{SETUP}/geometry.json",
         "results/afterburner/{SETUP}/geometry.png",
     params:
         ebeam=lambda w: afterburner_beams(w.SETUP)[0],
         pbeam=lambda w: afterburner_beams(w.SETUP)[1],
+        xangle=AFTERBURNER_XANGLE,
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
 python3 {input.script} --afterburner {input.afterburner} --pythia8 {input.pythia8} \
-  --ebeam {params.ebeam} --pbeam {params.pbeam} --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
+  --ebeam {params.ebeam} --pbeam {params.pbeam} --crossing-angle {params.xangle} \
+  --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
 """
 
 
 rule afterburner_distributions:
     input:
-        nominal="sim_output/afterburner/{SETUP}/nominal.hist.root",
+        headon="sim_output/afterburner/{SETUP}/headon.hist.root",
         afterburner="sim_output/afterburner/{SETUP}/afterburner.hist.root",
         pythia8="sim_output/afterburner/{SETUP}/pythia8.hist.root",
         script=f"{AFTERBURNER_DIR}/scripts/distributions.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/{SETUP}/distributions.json",
         "results/afterburner/{SETUP}/distributions.png",
@@ -202,7 +209,7 @@ rule afterburner_distributions:
         title=lambda w: f"abconv -p {AFTERBURNER_SETUPS[w.SETUP]['preset']}, {AFTERBURNER_N_EVENTS} events, seed {AFTERBURNER_SEED}",
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
-python3 {input.script} --nominal {input.nominal} --afterburner {input.afterburner} --pythia8 {input.pythia8} \
+python3 {input.script} --headon {input.headon} --afterburner {input.afterburner} --pythia8 {input.pythia8} \
   --setup {wildcards.SETUP} --title "{params.title}" --out results/afterburner/{wildcards.SETUP}
 """
 
@@ -213,30 +220,35 @@ rule afterburner_vertices:
         pythia8="sim_output/afterburner/{SETUP}/py8_full.hepmc",
         afterburner="sim_output/afterburner/{SETUP}/afterburner.hepmc",
         script=f"{AFTERBURNER_DIR}/scripts/vertices.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/{SETUP}/vertices.json",
+        "results/afterburner/{SETUP}/vertices.png",
+    params:
+        xangle=AFTERBURNER_XANGLE,
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
 python3 {input.script} --headon {input.headon} --pythia8 {input.pythia8} --afterburner {input.afterburner} \
-  --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
+  --crossing-angle {params.xangle} --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
 """
 
 
 rule afterburner_seed:
     input:
-        afterburner_a="sim_output/afterburner/{SETUP}/afterburner.hepmc",
-        afterburner_b="sim_output/afterburner/{SETUP}/afterburner_s2.hepmc",
-        pythia8_a="sim_output/afterburner/{SETUP}/py8_full.hepmc",
-        pythia8_b="sim_output/afterburner/{SETUP}/py8_full_s2.hepmc",
+        afterburner="sim_output/afterburner/{SETUP}/afterburner.hepmc",
+        afterburner_next_seed="sim_output/afterburner/{SETUP}/afterburner_next_seed.hepmc",
+        pythia8="sim_output/afterburner/{SETUP}/py8_full.hepmc",
+        pythia8_next_seed="sim_output/afterburner/{SETUP}/py8_full_next_seed.hepmc",
         script=f"{AFTERBURNER_DIR}/scripts/seed.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/{SETUP}/seed.json",
     params:
         nevents=AFTERBURNER_N_SEED_CHECK,
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
-python3 {input.script} --afterburner-a {input.afterburner_a} --afterburner-b {input.afterburner_b} \
-  --pythia8-a {input.pythia8_a} --pythia8-b {input.pythia8_b} --events {params.nevents} \
+python3 {input.script} --afterburner {input.afterburner} --afterburner-next-seed {input.afterburner_next_seed} \
+  --pythia8 {input.pythia8} --pythia8-next-seed {input.pythia8_next_seed} --events {params.nevents} \
   --setup {wildcards.SETUP} --out results/afterburner/{wildcards.SETUP}
 """
 
@@ -248,6 +260,7 @@ rule afterburner_report:
         "results/afterburner/{SETUP}/vertices.json",
         "results/afterburner/{SETUP}/seed.json",
         script=f"{AFTERBURNER_DIR}/scripts/report.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/{SETUP}/report.md",
         "results/afterburner/{SETUP}/tests.json",
@@ -257,11 +270,12 @@ rule afterburner_report:
         config=lambda w: AFTERBURNER_SETUPS[w.SETUP]["config"],
         nevents=AFTERBURNER_N_EVENTS,
         seed=AFTERBURNER_SEED,
+        xangle=AFTERBURNER_XANGLE,
     singularity: EIC_SINGULARITY_CONTAINER
     shell: """
 python3 {input.script} --dir results/afterburner/{wildcards.SETUP} --setup {wildcards.SETUP} \
   --preset {params.preset} --steering {params.steering} --config {params.config} \
-  --events {params.nevents} --seed {params.seed}
+  --events {params.nevents} --seed {params.seed} --crossing-angle {params.xangle}
 """
 
 
@@ -288,6 +302,7 @@ rule afterburner_summary:
         "results/afterburner/versions.txt",
         definition=f"{AFTERBURNER_DIR}/benchmark.json",
         script=f"{AFTERBURNER_DIR}/scripts/summary.py",
+        shared=AFTERBURNER_SHARED_SCRIPTS,
     output:
         "results/afterburner/summary.md",
         "results/afterburner.json",
