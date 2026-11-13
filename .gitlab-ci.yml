@@ -1,4 +1,4 @@
-image: ${BENCHMARKS_REGISTRY}/eic_xl${BENCHMARKS_SIGIL}${BENCHMARKS_TAG}
+image: ${BENCHMARKS_REGISTRY}/${BENCHMARKS_CONTAINER}${BENCHMARKS_SIGIL}${BENCHMARKS_TAG}
 
 variables:
   GITHUB_PR: ''
@@ -13,7 +13,7 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "web"'
     - if: '$CI_PIPELINE_SOURCE == "webide"'
     - if: '$CI_PIPELINE_SOURCE == "trigger"'
-    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_TAG'
 
 default:
