@@ -103,6 +103,7 @@ common:setup:
 
 include:
   - local: 'benchmarks/pythia8/config.yml'
+  - local: 'benchmarks/afterburner/config.yml'
 
 deploy_results:
   allow_failure: true
@@ -110,6 +111,7 @@ deploy_results:
   stage: deploy
   needs:
     - "collect_results:pythia8"
+    - "collect_results:afterburner"
   script:
     - snakemake $SNAKEMAKE_FLAGS --cores 1 results/metadata.json
     - find results -print | sort | tee summary.txt

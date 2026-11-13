@@ -8,6 +8,7 @@ EIC_SINGULARITY_CONTAINER = os.getenv("EIC_SINGULARITY_CONTAINER", "/cvmfs/eic.o
 
 
 include: "benchmarks/pythia8/Snakefile"
+include: "benchmarks/afterburner/Snakefile"
 
 
 rule metadata:

@@ -1,0 +1,20 @@
+bench:afterburner:
+  extends: .det_benchmark
+  stage: benchmarks
+  timeout: 1 hours
+  script:
+    - snakemake $SNAKEMAKE_FLAGS --cores ${MAX_CORES_PER_JOB:-4} afterburner
+
+collect_results:afterburner:
+  extends: .det_benchmark
+  stage: collect
+  needs:
+    - ["bench:afterburner"]
+  # abconv 0.2.1 fails known checks (crossing geometry of the interaction point, displaced vertices,
+  # seed); the job shows the benchmark result without blocking the pipeline
+  allow_failure: true
+  # Reads the benchmark job's results/ artifacts without Snakemake: in a fresh checkout the scripts are
+  # newer than results/, and Snakemake would rerun the whole benchmark here on one core.
+  script:
+    - cat results/afterburner/summary.md
+    - python3 benchmarks/afterburner/scripts/check.py results/afterburner.json

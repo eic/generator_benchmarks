@@ -52,3 +52,6 @@ calorimeters/test/
 # org2py output
 benchmarks/backgrounds/ecal_backwards.py
 benchmarks/ecal_gaps/ecal_gaps.py
+
+# benchmark logs
+/logs/
